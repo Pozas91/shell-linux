@@ -1,11 +1,4 @@
 /**
-*	Datos Identificativos:
-* Nombre: 		Nicolás
-* Apellidos: 	Pozas García
-* DNI:				79026446X
-**/
-
-/**
 UNIX Shell Project
 
 Sistemas Operativos
