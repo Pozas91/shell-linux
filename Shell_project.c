@@ -69,26 +69,10 @@ void manejador(int senal) {
 					// Actualizamos su estado en la lista
 					aux->state = STOPPED;
 
-                // Si no, se trata de un proceso terminado
+				// Si no, es que ha terminado y por tanto lo eliminamos de la lista
 				} else {
-
-                    if(aux->state == RESPAWNABLE) {
-
-                        // Restauramos las señales que reciben del terminal
-                        restore_terminal_signals();
-
-                        aux->args[0] = "#";
-
-                        // Volvemos a ejecutar el comando
-                        execvp(aux->command, aux->args);
-
-                        // Solo llegará aquí si no se ha producido el cambio de imagen
-                        printf("Error. No se ha podido hacer el respawn: %s\n", aux->command);
-                        exit(-1);
-                    }
-
-                    // Lo eliminamos de la lista
-                    delete_job(lista_trabajos, aux);
+					// Lo eliminamos de la lista
+					delete_job(lista_trabajos, aux);
 				}
 			}
 		}
@@ -190,17 +174,15 @@ void bgCommand(int index) {
 // -----------------------------------------------------------------------
 
 int main(void) {
-	char inputBuffer[MAX_LINE]; /** buffer to hold the command entered **/
-	int background;             /** equals 1 if a command is followed by '&' **/
-	int respawnable;			/** igual a 1 si al comando le sigue '#' **/
-	char *args[MAX_LINE / 2];   /** command line (of 256) has max of 128 arguments **/
-
+	char inputBuffer[MAX_LINE]; /* buffer to hold the command entered */
+	int background;             /* equals 1 if a command is followed by '&' */
+	char *args[MAX_LINE / 2];     /* command line (of 256) has max of 128 arguments */
 	// probably useful variables:
-	int pid_fork, pid_wait; 		/** pid for created and waited process **/
-	int status;             		/** status returned by wait **/
-	enum status status_res; 		/** status processed by analyze_status() **/
-	int info;						/** info processed by analyze_status() **/
-	ignore_terminal_signals();	    /** Ignora las señales del terminal **/
+	int pid_fork, pid_wait; /* pid for created and waited process */
+	int status;             /* status returned by wait */
+	enum status status_res; /* status processed by analyze_status() */
+	int info;				/* info processed by analyze_status() */
+	ignore_terminal_signals();	// Ignora las señales del terminal
 
 	/** Asociamos el manejador a la señal SIGCHLD y creamos la lista de trabajos **/
 	signal(SIGCHLD, manejador);
@@ -209,10 +191,10 @@ int main(void) {
 	/** Program terminates normally inside get_command() after ^D is typed **/
 	while(1) {
 
-		printf("\nCOMMAND->");
+		printf("COMMAND->");
 		fflush(stdout);
 		/** get next command **/
-		get_command(inputBuffer, MAX_LINE, args, &background, &respawnable);
+		get_command(inputBuffer, MAX_LINE, args, &background);
 
 		// if empty command
 		if(args[0] == NULL) {
@@ -222,11 +204,6 @@ int main(void) {
 		/** Comando interno CD **/
 		if(strcmp(args[0], "cd") == 0 && args[1] != NULL) {
 			chdir(args[1]);
-			continue;
-		}
-
-		/** Comando interno historial **/
-		if(strcmp(args[0], "historial") == 0) {
 			continue;
 		}
 
@@ -251,7 +228,7 @@ int main(void) {
 			continue;
 		}
 
-		/** Comando interno FG (HECHO) **/
+		/** Comando interno FG **/
 		if(strcmp(args[0], "fg") == 0) {
 			int index = 1;			// Por defecto a la primera tarea de la lista
 			if(args[1] != NULL) {
@@ -263,6 +240,7 @@ int main(void) {
 
 		// the steps are:
 		// (1) fork a child process using fork()
+
 		pid_fork = fork();
 
 		if(pid_fork < 0) {	// Caso de error
@@ -275,7 +253,7 @@ int main(void) {
 			pid_t mypid = getpid();
 			new_process_group(mypid);	// Metemos al hijo en un nuevo grupo
 
-			if(!background && !respawnable) {
+			if(!background) {
 				// Le asignamos el terminal
 				set_terminal(mypid);
 			}
@@ -296,29 +274,9 @@ int main(void) {
 			/** Nuevo identificador de grupo de procesos para el hijo **/
 			new_process_group(pid_fork);	// El padre se va a un nuevo grupo de trabajo
 
-			/** Si el programa está en background o es respawnable **/
-			if(background || respawnable) {
+			// (3) if background == 0, the parent will wait, otherwise continue
 
-				/** BLoqueamos la señal SIGCHLD, añadimos el trabajo a la lista(background) y desbloqueamos la señal **/
-				block_SIGCHLD();
-
-				job *aux;
-
-				// Creamos un nuevo nodo para agregarlo a la lista
-				if(background) {
-					aux = new_job(pid_fork, args[0], args, BACKGROUND);
-				} else if(respawnable) {
-					aux = new_job(pid_fork, args[0], args, RESPAWNABLE);
-				}
-
-				// Añadimos ese nodo a la lista creada anteriormente
-				add_job(lista_trabajos, aux);
-				unblock_SIGCHLD();
-
-				printf("Background job running... pid: %d, command: %s. \n", pid_fork, args[0]);
-
-			/** Si no, es por que está en foreground **/
-			} else {
+			if(!background) {
 				/**
 				 * Wait con detección de suspension y recuperación del terminal
 				 * Con el WUNTRACED se comprueba también si el hijo se suspende
@@ -344,15 +302,26 @@ int main(void) {
 					/** BLoqueamos la señal SIGCHLD, añadimos el trabajo a la lista (suspendido) y desbloqueamos la señal **/
 					block_SIGCHLD();
 					// Creamos un nuevo nodo para agregarlo a la lista
-					job *aux = new_job(pid_fork, args[0], args, STOPPED);
+					job *aux = new_job(pid_fork, args[0], STOPPED);
 					// Añadimos ese nodo a la lista creada anteriormente
 					add_job(lista_trabajos, aux);
 					unblock_SIGCHLD();
 				}
 
 				// (4) Shell shows a status message for processed command
-				printf("Foreground pid: %d, command: %s, status: %s, info: %d. \n", wait_pid, args[0], status_strings[st], info);
+				printf("Foreground pid: %d, command: %s, status: %s, info: %d \n", wait_pid, args[0], status_strings[st], info);
 
+			} else {
+
+				/** BLoqueamos la señal SIGCHLD, añadimos el trabajo a la lista(background) y desbloqueamos la señal **/
+				block_SIGCHLD();
+				// Creamos un nuevo nodo para agregarlo a la lista
+				job *aux = new_job(pid_fork, args[0], BACKGROUND);
+				// Añadimos ese nodo a la lista creada anteriormente
+				add_job(lista_trabajos, aux);
+				unblock_SIGCHLD();
+
+				printf("Background job running... pid: %d, command: %s \n", pid_fork, args[0]);
 			}
 		}
 
@@ -360,4 +329,3 @@ int main(void) {
 
 	} // end while
 }
-
